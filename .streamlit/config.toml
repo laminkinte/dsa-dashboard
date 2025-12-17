@@ -3,12 +3,6 @@ headless = true
 port = 8501
 enableCORS = false
 enableXsrfProtection = true
-maxUploadSize = 200
-
-[browser]
-serverAddress = "localhost"
-serverPort = 8501
-gatherUsageStats = false
 
 [theme]
 base = "light"
