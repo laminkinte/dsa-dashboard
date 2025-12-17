@@ -4,9 +4,7 @@ Helper functions for the DSA dashboard
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List
-import streamlit as st
-from datetime import datetime
+from typing import Dict
 from io import BytesIO
 
 def format_number(num: int) -> str:
@@ -49,17 +47,3 @@ def create_excel_download(report_data: Dict, report_type: str = 'report1'):
     
     output.seek(0)
     return output
-
-def filter_by_dsa(data: pd.DataFrame, dsa_filter: str) -> pd.DataFrame:
-    """Filter dataframe by DSA mobile numbers"""
-    if not dsa_filter or not isinstance(data, pd.DataFrame) or data.empty:
-        return data
-    
-    dsas = [d.strip() for d in dsa_filter.split(',') if d.strip()]
-    if not dsas:
-        return data
-    
-    if 'dsa_mobile' in data.columns:
-        return data[data['dsa_mobile'].isin(dsas)]
-    
-    return data
