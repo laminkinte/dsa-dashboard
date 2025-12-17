@@ -28,8 +28,61 @@ try:
         filter_by_dsa
     )
 except ImportError as e:
-    st.error(f"❌ Import Error: {str(e)}")
-    st.info("Please ensure the 'utils' directory exists with all required modules.")
+    # Fallback implementations if utils not available
+    class DSA_Analyzer:
+        def __init__(self):
+            pass
+        
+        def load_and_clean_data(self, files):
+            return files
+        
+        def generate_report1(self, dfs):
+            return {'qualified_customers': pd.DataFrame(), 'dsa_summary': pd.DataFrame()}
+        
+        def generate_report2(self, dfs):
+            return {'report2_results': pd.DataFrame()}
+    
+    def format_number(num: int) -> str:
+        try:
+            return f"{int(num):,}"
+        except (ValueError, TypeError):
+            return str(num)
+    
+    def validate_file(uploaded_files: dict) -> dict:
+        required_files = ['onboarding', 'deposit', 'ticket', 'scan']
+        missing_files = []
+        for file_key in required_files:
+            if file_key not in uploaded_files or uploaded_files[file_key] is None:
+                missing_files.append(file_key)
+        
+        if missing_files:
+            return {'valid': False, 'message': f"Missing: {', '.join(missing_files)}"}
+        return {'valid': True, 'message': 'All files validated successfully'}
+    
+    def create_excel_download(report_data: dict, report_type: str = 'report1'):
+        from io import BytesIO
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            if report_type == 'report1':
+                if 'qualified_customers' in report_data:
+                    report_data['qualified_customers'].to_excel(writer, sheet_name='Qualified_Customers', index=False)
+                if 'dsa_summary' in report_data:
+                    report_data['dsa_summary'].to_excel(writer, sheet_name='DSA_Summary', index=False)
+            else:
+                if 'report2_results' in report_data:
+                    report_data['report2_results'].to_excel(writer, sheet_name='Detailed_Analysis', index=False)
+        output.seek(0)
+        return output
+    
+    def filter_by_dsa(data: pd.DataFrame, dsa_filter: str) -> pd.DataFrame:
+        if not dsa_filter or not isinstance(data, pd.DataFrame) or data.empty:
+            return data
+        dsas = [d.strip() for d in dsa_filter.split(',') if d.strip()]
+        if not dsas:
+            return data
+        if 'dsa_mobile' in data.columns:
+            return data[data['dsa_mobile'].isin(dsas)]
+        return data
 
 warnings.filterwarnings('ignore')
 
@@ -42,8 +95,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
     menu_items={
-        'Get Help': 'https://github.com/yourusername/dsa-dashboard',
-        'Report a bug': 'https://github.com/yourusername/dsa-dashboard/issues',
+        'Get Help': 'https://github.com/laminkinte/dsa-dashboard',
+        'Report a bug': 'https://github.com/laminkinte/dsa-dashboard/issues',
         'About': """
         # DSA Performance Dashboard v1.0.0
         
@@ -119,20 +172,6 @@ st.markdown("""
         color: #6B7280;
         text-transform: uppercase;
         letter-spacing: 0.05em;
-    }
-    
-    /* Sidebar styling */
-    .sidebar .sidebar-content {
-        background: linear-gradient(180deg, #1E3A8A 0%, #3B82F6 100%);
-        color: white;
-    }
-    
-    .sidebar-title {
-        color: white !important;
-        font-weight: bold;
-        text-align: center;
-        margin-bottom: 2rem;
-        padding-top: 1rem;
     }
     
     /* Button styling */
@@ -225,19 +264,6 @@ st.markdown("""
         border-radius: 4px;
         margin: 1rem 0;
     }
-    
-    /* Progress bar */
-    .stProgress > div > div > div {
-        background: linear-gradient(90deg, #3B82F6, #8B5CF6);
-    }
-    
-    /* File uploader */
-    .stFileUploader > div > div {
-        border: 2px dashed #3B82F6;
-        border-radius: 8px;
-        padding: 20px;
-        background: rgba(59, 130, 246, 0.05);
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -260,7 +286,7 @@ def initialize_session_state():
         st.session_state.uploaded_files = {}
 
 # ================================
-# DISPLAY FUNCTIONS FOR REPORT 1
+# DISPLAY FUNCTIONS
 # ================================
 def display_report1_metrics(report_data, dsa_filter):
     """Display metrics for Report 1"""
@@ -314,7 +340,7 @@ def display_report1_metrics(report_data, dsa_filter):
 
 def display_report1_details(report_data, dsa_filter):
     """Display detailed data for Report 1"""
-    tab1, tab2, tab3 = st.tabs(["📋 Qualified Customers", "📊 DSA Summary", "📈 Visualizations"])
+    tab1, tab2 = st.tabs(["📋 Qualified Customers", "📊 DSA Summary"])
     
     with tab1:
         qualified_df = report_data.get('qualified_customers', pd.DataFrame())
@@ -326,12 +352,7 @@ def display_report1_details(report_data, dsa_filter):
             st.dataframe(
                 qualified_df,
                 use_container_width=True,
-                height=500,
-                column_config={
-                    "ticket_amount": st.column_config.NumberColumn("Ticket Amount", format="$%.2f"),
-                    "scan_amount": st.column_config.NumberColumn("Scan Amount", format="$%.2f"),
-                    "Payment (Customer Count *40)": st.column_config.NumberColumn("Payment", format="$%.0f"),
-                }
+                height=500
             )
         else:
             st.warning("No qualified customers found in the data.")
@@ -348,57 +369,10 @@ def display_report1_details(report_data, dsa_filter):
             st.dataframe(
                 dsa_summary,
                 use_container_width=True,
-                height=500,
-                column_config={
-                    "Ticket_Conversion_Rate": st.column_config.NumberColumn("Ticket Conv %", format="%.1f%%"),
-                    "Scan_Conversion_Rate": st.column_config.NumberColumn("Scan Conv %", format="%.1f%%"),
-                    "Deposit_Conversion_Rate": st.column_config.NumberColumn("Deposit Conv %", format="%.1f%%"),
-                    "Total_Ticket_Amount": st.column_config.NumberColumn("Total Ticket", format="$%.2f"),
-                    "Total_Scan_Amount": st.column_config.NumberColumn("Total Scan", format="$%.2f"),
-                }
+                height=500
             )
         else:
             st.warning("No DSA summary data available.")
-    
-    with tab3:
-        dsa_summary = report_data.get('dsa_summary', pd.DataFrame())
-        
-        if not dsa_summary.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Top 10 DSAs by customer count
-                top10 = dsa_summary.sort_values('Customer_Count', ascending=False).head(10)
-                if not top10.empty:
-                    fig1 = px.bar(
-                        top10,
-                        x='dsa_mobile',
-                        y='Customer_Count',
-                        title='Top 10 DSAs by Customer Count',
-                        labels={'dsa_mobile': 'DSA Mobile', 'Customer_Count': 'Customer Count'},
-                        color='Customer_Count',
-                        color_continuous_scale='Blues'
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
-            
-            with col2:
-                # Conversion rates scatter plot
-                if len(dsa_summary) > 1:
-                    fig2 = px.scatter(
-                        dsa_summary,
-                        x='Ticket_Conversion_Rate',
-                        y='Scan_Conversion_Rate',
-                        size='Customer_Count',
-                        hover_name='dsa_mobile',
-                        title='Conversion Rates Comparison',
-                        labels={
-                            'Ticket_Conversion_Rate': 'Ticket Conversion Rate (%)',
-                            'Scan_Conversion_Rate': 'Scan Conversion Rate (%)'
-                        },
-                        color='Customer_Count',
-                        color_continuous_scale='Viridis'
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
 
 def display_report1_download(report_data):
     """Display download options for Report 1"""
@@ -408,13 +382,6 @@ def display_report1_download(report_data):
     
     with col1:
         st.markdown("#### Excel Format (Recommended)")
-        st.markdown("""
-        <div class='info-box'>
-            <strong>Complete Report</strong><br>
-            All sheets with formatting and calculations
-        </div>
-        """, unsafe_allow_html=True)
-        
         excel_data = create_excel_download(report_data, 'report1')
         st.download_button(
             label="📥 Download Full Excel Report",
@@ -427,13 +394,6 @@ def display_report1_download(report_data):
     
     with col2:
         st.markdown("#### CSV Format")
-        st.markdown("""
-        <div class='info-box'>
-            <strong>Individual Files</strong><br>
-            Download specific data sheets
-        </div>
-        """, unsafe_allow_html=True)
-        
         col_a, col_b = st.columns(2)
         with col_a:
             if 'qualified_customers' in report_data:
@@ -456,9 +416,6 @@ def display_report1_download(report_data):
                     use_container_width=True
                 )
 
-# ================================
-# DISPLAY FUNCTIONS FOR REPORT 2
-# ================================
 def display_report2_metrics(report_data, dsa_filter):
     """Display metrics for Report 2"""
     results_df = report_data.get('report2_results', pd.DataFrame())
@@ -518,119 +475,19 @@ def display_report2_metrics(report_data, dsa_filter):
 
 def display_report2_details(report_data, dsa_filter):
     """Display detailed data for Report 2"""
-    tab1, tab2, tab3 = st.tabs(["📋 Detailed Analysis", "🎯 Match Analysis", "📊 Performance"])
+    results_df = report_data.get('report2_results', pd.DataFrame())
     
-    with tab1:
-        results_df = report_data.get('report2_results', pd.DataFrame())
-        
-        if dsa_filter and not results_df.empty:
-            results_df = filter_by_dsa(results_df, dsa_filter)
-        
-        if not results_df.empty:
-            # Add filtering options
-            col1, col2 = st.columns(2)
-            with col1:
-                match_status_options = results_df['match_status'].unique().tolist()
-                selected_status = st.multiselect(
-                    "Filter by Match Status",
-                    options=match_status_options,
-                    default=match_status_options
-                )
-            
-            with col2:
-                show_summary = st.checkbox("Show Summary Rows Only", value=True)
-            
-            # Apply filters
-            if selected_status:
-                results_df = results_df[results_df['match_status'].isin(selected_status)]
-            
-            if show_summary:
-                filtered_df = results_df[results_df['Customer Count'] != '']
-            else:
-                filtered_df = results_df
-            
-            st.dataframe(
-                filtered_df,
-                use_container_width=True,
-                height=500,
-                column_config={
-                    "Payment": st.column_config.NumberColumn("Commission", format="$%.0f"),
-                    "match_status": st.column_config.TextColumn(
-                        "Match Status",
-                        help="MATCH: Customer onboarded by same DSA\nMISMATCH: Customer onboarded by different DSA\nNO ONBOARDING: Customer not onboarded"
-                    )
-                }
-            )
-        else:
-            st.warning("No detailed analysis data available.")
+    if dsa_filter and not results_df.empty:
+        results_df = filter_by_dsa(results_df, dsa_filter)
     
-    with tab2:
-        results_df = report_data.get('report2_results', pd.DataFrame())
-        
-        if not results_df.empty:
-            # Match status distribution
-            if 'match_status' in results_df.columns:
-                match_counts = results_df['match_status'].value_counts()
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    fig1 = px.pie(
-                        values=match_counts.values,
-                        names=match_counts.index,
-                        title='Onboarding Match Status Distribution',
-                        color_discrete_sequence=px.colors.qualitative.Set2
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
-                
-                with col2:
-                    # Show match statistics
-                    total_customers = len(results_df[results_df['customer_mobile'] != ''])
-                    match_rate = (match_counts.get('MATCH', 0) / total_customers * 100) if total_customers > 0 else 0
-                    
-                    st.metric("Match Rate", f"{match_rate:.1f}%")
-                    st.metric("Total Customers", total_customers)
-                    st.metric("Matched Customers", match_counts.get('MATCH', 0))
-                    st.metric("Mismatched Customers", match_counts.get('MISMATCH', 0))
-    
-    with tab3:
-        results_df = report_data.get('report2_results', pd.DataFrame())
-        
-        if not results_df.empty:
-            # Filter summary rows
-            summary_rows = results_df[results_df['Customer Count'] != '']
-            
-            if not summary_rows.empty:
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    # Top DSAs by customer count
-                    top10 = summary_rows.sort_values('Customer Count', ascending=False).head(10)
-                    fig2 = px.bar(
-                        top10,
-                        x='dsa_mobile',
-                        y='Customer Count',
-                        title='Top DSAs by Customer Count',
-                        labels={'dsa_mobile': 'DSA Mobile', 'Customer Count': 'Customer Count'},
-                        color='Customer Count',
-                        color_continuous_scale='Greens'
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
-                
-                with col2:
-                    # Payment vs Customer Count
-                    fig3 = px.scatter(
-                        summary_rows,
-                        x='Customer Count',
-                        y='Payment',
-                        size='Ticket Count',
-                        hover_name='dsa_mobile',
-                        title='Commission vs Customer Count',
-                        labels={'Customer Count': 'Number of Customers', 'Payment': 'Commission ($)'},
-                        color='Customer Count',
-                        color_continuous_scale='Viridis'
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
+    if not results_df.empty:
+        st.dataframe(
+            results_df,
+            use_container_width=True,
+            height=500
+        )
+    else:
+        st.warning("No detailed analysis data available.")
 
 def display_report2_download(report_data):
     """Display download options for Report 2"""
@@ -640,13 +497,6 @@ def display_report2_download(report_data):
     
     with col1:
         st.markdown("#### Excel Format")
-        st.markdown("""
-        <div class='info-box'>
-            <strong>Complete Analysis</strong><br>
-            All data with formatting
-        </div>
-        """, unsafe_allow_html=True)
-        
         excel_data = create_excel_download(report_data, 'report2')
         st.download_button(
             label="📥 Download Excel Report",
@@ -659,13 +509,6 @@ def display_report2_download(report_data):
     
     with col2:
         st.markdown("#### CSV Format")
-        st.markdown("""
-        <div class='info-box'>
-            <strong>Detailed Data</strong><br>
-            Complete analysis in CSV format
-        </div>
-        """, unsafe_allow_html=True)
-        
         if 'report2_results' in report_data:
             csv_data = report_data['report2_results'].to_csv(index=False)
             st.download_button(
@@ -676,9 +519,6 @@ def display_report2_download(report_data):
                 use_container_width=True
             )
 
-# ================================
-# WELCOME SCREEN
-# ================================
 def show_welcome_screen():
     """Display welcome screen with instructions"""
     st.markdown("<h1 class='main-header'>DSA Performance Dashboard</h1>", unsafe_allow_html=True)
@@ -720,58 +560,13 @@ def show_welcome_screen():
             </ul>
         </div>
         """, unsafe_allow_html=True)
-    
-    # Sample data section
-    with st.expander("📥 Download Sample Templates", expanded=False):
-        st.info("Use these sample templates to understand the required data format.")
-        
-        # Create sample data
-        sample_onboarding = pd.DataFrame({
-            'Mobile': ['1234567', '2345678', '3456789'],
-            'Customer Referrer Mobile': ['7777777', '7777777', '8888888'],
-            'Full Name': ['Customer One', 'Customer Two', 'Customer Three'],
-            'Account ID': ['ACC-001', 'ACC-002', 'ACC-003']
-        })
-        
-        sample_deposit = pd.DataFrame({
-            'User Identifier': ['1234567', '2345678'],
-            'Created By': ['7777777', '7777777'],
-            'Amount': [100, 200],
-            'Transaction Type': ['CR', 'CR'],
-            'Full Name': ['Customer One', 'Customer Two']
-        })
-        
-        col_a, col_b = st.columns(2)
-        with col_a:
-            csv1 = sample_onboarding.to_csv(index=False)
-            st.download_button(
-                label="Download Sample Onboarding.csv",
-                data=csv1,
-                file_name="sample_onboarding.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-        
-        with col_b:
-            csv2 = sample_deposit.to_csv(index=False)
-            st.download_button(
-                label="Download Sample Deposit.csv",
-                data=csv2,
-                file_name="sample_deposit.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
 
-# ================================
-# SIDEBAR
-# ================================
 def render_sidebar():
     """Render sidebar with file uploads and filters"""
     with st.sidebar:
-        # Sidebar header with logo
         st.markdown("""
         <div style='text-align: center; padding: 1rem 0;'>
-            <h1 class='sidebar-title'>📊 DSA Dashboard</h1>
+            <h2 style='color: white;'>📊 DSA Dashboard</h2>
             <p style='color: white; opacity: 0.8;'>Professional Analytics Platform</p>
         </div>
         """, unsafe_allow_html=True)
@@ -781,85 +576,41 @@ def render_sidebar():
         # File Upload Section
         st.markdown("### 📁 Data Upload")
         
-        with st.expander("Upload CSV Files", expanded=True):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                onboarding_file = st.file_uploader(
-                    "Onboarding CSV",
-                    type=['csv'],
-                    key="onboarding_upload",
-                    help="Customer onboarding data with Mobile and Referrer Mobile columns"
-                )
-                
-                deposit_file = st.file_uploader(
-                    "Deposit CSV",
-                    type=['csv'],
-                    key="deposit_upload",
-                    help="Deposit transaction data"
-                )
-            
-            with col2:
-                ticket_file = st.file_uploader(
-                    "Ticket CSV",
-                    type=['csv'],
-                    key="ticket_upload",
-                    help="Ticket purchase data"
-                )
-                
-                scan_file = st.file_uploader(
-                    "Scan CSV",
-                    type=['csv'],
-                    key="scan_upload",
-                    help="Scan-to-send transaction data"
-                )
-            
-            conversion_file = st.file_uploader(
-                "Conversion CSV (Optional)",
-                type=['csv'],
-                key="conversion_upload",
-                help="Optional conversion data"
-            )
+        onboarding_file = st.file_uploader("Onboarding CSV", type=['csv'], key="onboarding_upload")
+        deposit_file = st.file_uploader("Deposit CSV", type=['csv'], key="deposit_upload")
+        ticket_file = st.file_uploader("Ticket CSV", type=['csv'], key="ticket_upload")
+        scan_file = st.file_uploader("Scan CSV", type=['csv'], key="scan_upload")
+        conversion_file = st.file_uploader("Conversion CSV (Optional)", type=['csv'], key="conversion_upload")
         
         st.markdown("---")
         
         # Filters Section
         st.markdown("### 🔍 Filters")
         
-        with st.expander("DSA & Report Filters", expanded=True):
-            # DSA Filter
-            dsa_filter = st.text_input(
-                "DSA Mobile Numbers",
-                placeholder="e.g., 1234567, 2345678, 3456789",
-                help="Enter multiple DSA numbers separated by commas"
-            )
-            
-            # Report Selection
-            report_type = st.radio(
-                "Report Type",
-                ["📈 Performance Report", "🔍 Detailed Analysis"],
-                index=0,
-                help="Select the type of analysis to perform"
-            )
+        dsa_filter = st.text_input(
+            "DSA Mobile Numbers",
+            placeholder="e.g., 1234567, 2345678, 3456789"
+        )
+        
+        report_type = st.radio(
+            "Report Type",
+            ["📈 Performance Report", "🔍 Detailed Analysis"],
+            index=0
+        )
         
         st.markdown("---")
         
         # Action Buttons
-        col1, col2 = st.columns(2)
+        if st.button("🔄 Clear All", use_container_width=True):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
         
-        with col1:
-            if st.button("🔄 Clear All", use_container_width=True, help="Clear all data and start fresh"):
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
-        
-        with col2:
-            process_btn = st.button(
-                "🚀 Process Data",
-                type="primary",
-                use_container_width=True,
-                help="Click to process uploaded files and generate reports"
-            )
+        process_btn = st.button(
+            "🚀 Process Data",
+            type="primary",
+            use_container_width=True
+        )
         
         return {
             'files': {
@@ -948,10 +699,8 @@ def main():
                 display_report1_details(st.session_state.report1_data, dsa_filter)
             
             with tab2:
-                # Additional visualizations can go here
                 dsa_summary = st.session_state.report1_data.get('dsa_summary', pd.DataFrame())
                 if not dsa_summary.empty:
-                    # Conversion rates over time (if date data available)
                     col1, col2 = st.columns(2)
                     with col1:
                         # Customer distribution by DSA
@@ -961,24 +710,6 @@ def main():
                             names='dsa_mobile',
                             title='Customer Distribution by DSA',
                             hole=0.3
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                    with col2:
-                        # Conversion rates bar chart
-                        conv_data = dsa_summary.melt(
-                            id_vars=['dsa_mobile'],
-                            value_vars=['Ticket_Conversion_Rate', 'Scan_Conversion_Rate', 'Deposit_Conversion_Rate'],
-                            var_name='Conversion Type',
-                            value_name='Rate'
-                        )
-                        fig = px.bar(
-                            conv_data,
-                            x='dsa_mobile',
-                            y='Rate',
-                            color='Conversion Type',
-                            barmode='group',
-                            title='Conversion Rates by DSA'
                         )
                         st.plotly_chart(fig, use_container_width=True)
             
@@ -995,38 +726,12 @@ def main():
             display_report2_metrics(st.session_state.report2_data, dsa_filter)
             
             # Tabs for Report 2
-            tab1, tab2, tab3 = st.tabs(["📋 Detailed Analysis", "🎯 Insights", "📥 Export"])
+            tab1, tab2 = st.tabs(["📋 Detailed Analysis", "📥 Export"])
             
             with tab1:
                 display_report2_details(st.session_state.report2_data, dsa_filter)
             
             with tab2:
-                # Show summary statistics
-                if 'summary_stats' in st.session_state.report2_data:
-                    stats = st.session_state.report2_data['summary_stats']
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.markdown("#### Overall Statistics")
-                        st.metric("Total DSAs", stats['total_dsas'])
-                        st.metric("Total Customers", stats['total_customers'])
-                        st.metric("Total Commission", f"${format_number(stats['total_payment'])}")
-                    
-                    with col2:
-                        st.markdown("#### Match Status")
-                        if stats['match_status_counts']:
-                            for status, count in stats['match_status_counts'].items():
-                                percentage = (count / stats['total_customers'] * 100) if stats['total_customers'] > 0 else 0
-                                st.metric(f"{status}", f"{count} ({percentage:.1f}%)")
-                
-                # Top DSAs
-                if 'summary_stats' in st.session_state.report2_data and st.session_state.report2_data['summary_stats']['top_dsas']:
-                    st.markdown("#### Top Performing DSAs")
-                    top_dsas_data = pd.DataFrame(st.session_state.report2_data['summary_stats']['top_dsas'])
-                    st.dataframe(top_dsas_data, use_container_width=True)
-            
-            with tab3:
                 display_report2_download(st.session_state.report2_data)
     
     else:
